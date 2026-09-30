@@ -1,0 +1,12 @@
+.DS_Store
+.firebase/
+.omc/
+public/
+venv/
+shots/raw-*.png
+shots/pdf-*.png
+shots/index.html
+shots/stations.js
+shots/verdict.js
+fuel-map-talk.pdf
+talk.html

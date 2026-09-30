@@ -1,0 +1,722 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
+<title>Бензин · Жанармай · Fuel — Астана, Алматы</title>
+<meta name="theme-color" content="#e9e9ec" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Где заправляться">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" href="icon-192.png">
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  :root{
+    --glass: rgba(255,255,255,.78);
+    --edge: rgba(255,255,255,.65);
+    --ink: #1c1c1e;
+    --ink-2: rgba(60,60,67,.6);
+    --fill: rgba(120,120,128,.16);
+    --sep: rgba(60,60,67,.13);
+    --shadow: 0 10px 34px rgba(0,0,0,.14);
+    --sheet-peek: 188px;
+    --sheet-full: min(82vh, 660px);
+  }
+  body.dark{
+    --glass: rgba(28,28,30,.8);
+    --edge: rgba(255,255,255,.12);
+    --ink: #f2f2f7;
+    --ink-2: rgba(235,235,245,.6);
+    --fill: rgba(118,118,128,.24);
+    --sep: rgba(235,235,245,.16);
+    --shadow: 0 10px 34px rgba(0,0,0,.5);
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{height:100%;overflow:hidden}
+  body{
+    margin:0;color:var(--ink);background:#e9e9ec;
+    font:400 17px/1.35 -apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  body.dark{background:#000}
+  #map{position:fixed;inset:0}
+  .leaflet-tile-pane{filter:grayscale(.9) contrast(.92) brightness(1.06)}
+  body.dark .leaflet-tile-pane{filter:invert(1) hue-rotate(180deg) grayscale(.75) brightness(.85)}
+  .leaflet-control-zoom{display:none}
+  .leaflet-control-attribution{background:rgba(255,255,255,.6);font-size:9px;padding:0 4px;color:#8a8f98}
+  .leaflet-control-attribution a{color:#8a8f98}
+  body.dark .leaflet-control-attribution{background:rgba(0,0,0,.4);color:#6b7078}
+  .glass{
+    background:var(--glass);
+    -webkit-backdrop-filter:blur(30px) saturate(180%);backdrop-filter:blur(30px) saturate(180%);
+    border:.5px solid var(--edge);box-shadow:var(--shadow);
+  }
+
+  header{
+    position:fixed;z-index:500;left:10px;right:10px;top:calc(10px + env(safe-area-inset-top));
+    padding:8px;border-radius:18px;
+  }
+  .top{display:flex;align-items:center;gap:8px}
+  .top .seg{flex:1;min-width:0}
+  .lang{display:flex;gap:2px;padding:2px;border-radius:9px;background:var(--fill);flex:none}
+  .lang button{
+    padding:5px 8px;border:0;border-radius:7px;background:none;color:var(--ink-2);
+    font:600 12px/1 -apple-system,sans-serif;letter-spacing:.2px;text-transform:uppercase
+  }
+  .lang button.on{background:var(--glass);color:var(--ink);border:.5px solid var(--edge)}
+  body.dark .lang button.on{background:rgba(99,99,102,.9)}
+  .seg{
+    -webkit-appearance:none;appearance:none;width:100%;
+    padding:10px 30px 10px 12px;border:.5px solid var(--edge);border-radius:11px;
+    background:var(--fill);color:var(--ink);
+    font:590 15px/1 -apple-system,sans-serif;letter-spacing:-.2px;
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6'><path d='M1 1l4 4 4-4' fill='none' stroke='%238a8f98' stroke-width='1.6' stroke-linecap='round'/></svg>");
+    background-repeat:no-repeat;background-position:right 11px center
+  }
+
+  /* круглая кнопка «моё место», как в картах */
+  #locate{
+    position:fixed;z-index:500;right:12px;width:46px;height:46px;border-radius:50%;
+    bottom:calc(var(--sheet-peek) + 22px + env(safe-area-inset-bottom));
+    display:flex;align-items:center;justify-content:center;font-size:21px;border:0;
+    color:var(--ink);transition:opacity .2s
+  }
+  #locate.busy{opacity:.5}
+  #locate.hide{opacity:0;pointer-events:none}
+  #tips{
+    position:fixed;z-index:500;right:12px;width:46px;height:46px;border-radius:50%;
+    bottom:calc(var(--sheet-peek) + 76px + env(safe-area-inset-bottom));
+    display:flex;align-items:center;justify-content:center;border:0;color:var(--ink);
+    font:600 20px/1 -apple-system,sans-serif;transition:opacity .2s
+  }
+  #tips.hide{opacity:0;pointer-events:none}
+  #tipsPanel{
+    position:fixed;inset:0;z-index:800;display:flex;align-items:flex-end;justify-content:center;
+    background:rgba(0,0,0,.3);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px)
+  }
+  #tipsPanel[hidden]{display:none}
+  .tips-card{
+    width:100%;max-width:520px;max-height:88vh;border-radius:22px 22px 0 0;
+    display:flex;flex-direction:column;padding-bottom:env(safe-area-inset-bottom)
+  }
+  .tips-head{display:flex;align-items:center;justify-content:space-between;padding:16px 18px 10px}
+  .tips-head h2{margin:0;font:700 20px/1.2 -apple-system,sans-serif;letter-spacing:-.4px}
+  .tips-head button{
+    width:32px;height:32px;border:0;border-radius:50%;background:var(--fill);color:var(--ink);font-size:14px
+  }
+  .tips-body{overflow-y:auto;padding:0 18px 18px;-webkit-overflow-scrolling:touch}
+  .tips-body section{padding:14px 0;border-top:.5px solid var(--sep)}
+  .tips-body section:first-child{border-top:0;padding-top:4px}
+  .tips-body h3{margin:0 0 6px;font:600 16px/1.25 -apple-system,sans-serif;letter-spacing:-.3px}
+  .tips-body p{margin:0;font-size:14.5px;line-height:1.5;color:var(--ink-2)}
+
+  /* нижняя шторка со списком ближайших */
+  .sheet{
+    position:fixed;z-index:501;left:0;right:0;bottom:0;
+    border-radius:22px 22px 0 0;border-bottom:0;
+    height:var(--sheet-full);display:flex;flex-direction:column;
+    touch-action:none;will-change:transform;
+    transform:translate3d(0,calc(var(--sheet-full) - var(--sheet-peek)),0);
+    transition:transform .4s cubic-bezier(.32,.72,0,1)
+  }
+  .sheet.open{transform:translate3d(0,0,0)}
+  .sheet.drag{transition:none}
+  .grip-zone{padding:8px 0 4px;flex:none;cursor:grab;touch-action:none}
+  .grip{width:38px;height:5px;border-radius:3px;background:var(--fill);margin:0 auto}
+  .sheet h2{
+    margin:2px 16px 8px;font:600 15px/1.2 -apple-system,sans-serif;letter-spacing:-.2px;
+    display:flex;justify-content:space-between;align-items:baseline
+  }
+  .sheet h2 small{display:block;font-weight:400;font-size:13px;line-height:1.3;margin-top:3px;color:var(--ink-2)}
+  .pills{
+    display:flex;gap:7px;padding:0 16px 10px;overflow-x:auto;flex:none;
+    scrollbar-width:none;-webkit-overflow-scrolling:touch
+  }
+  .pills::-webkit-scrollbar{display:none}
+  .pill{
+    display:flex;align-items:center;gap:6px;flex:none;padding:7px 13px;border:0;
+    border-radius:100px;background:var(--fill);color:var(--ink);
+    font:590 14px/1 -apple-system,sans-serif;letter-spacing:-.1px;transition:.18s
+  }
+  .pill i{width:8px;height:8px;border-radius:50%;flex:none}
+  .pill em{font-style:normal;color:var(--ink-2);font-weight:400}
+  .pill.on{color:#fff}
+  .pill.on em{color:rgba(255,255,255,.75)}
+  .pill.on i{display:none}
+  .pill:disabled{opacity:.35}
+  .list{overflow-y:auto;overscroll-behavior:contain;touch-action:pan-y;-webkit-overflow-scrolling:touch;padding:0 0 calc(12px + env(safe-area-inset-bottom))}
+  .row{
+    display:flex;align-items:center;gap:12px;padding:11px 16px;border:0;width:100%;
+    background:none;color:inherit;font:inherit;text-align:left;border-top:.5px solid var(--sep)
+  }
+  .row:first-child{border-top:0}
+  .row:active{background:var(--fill)}
+  .dot{width:11px;height:11px;border-radius:50%;flex:none}
+  .row .txt{flex:1;min-width:0}
+  .row b{display:block;font:590 16px/1.25 -apple-system,sans-serif;letter-spacing:-.3px}
+  .row span{
+    display:block;font-size:13px;color:var(--ink-2);
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis
+  }
+  .row .km{font:600 14px/1 -apple-system,sans-serif;color:var(--ink-2);flex:none}
+  .hint{padding:14px 16px;font-size:14px;color:var(--ink-2)}
+  .hint.src{padding-top:0}
+  .hint.dis{font-size:13px;opacity:.85}
+  #gate{
+    position:fixed;inset:0;z-index:900;display:flex;align-items:center;justify-content:center;padding:22px;
+    background:rgba(0,0,0,.32);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px)
+  }
+  #gate[hidden]{display:none}
+  .gate-card{max-width:360px;padding:20px;border-radius:22px}
+  .gate-card h2{margin:0 0 10px;font:700 19px/1.2 -apple-system,sans-serif;letter-spacing:-.4px}
+  .gate-card p{margin:0 0 16px;font-size:14px;line-height:1.45;color:var(--ink-2)}
+  .gate-card button{
+    width:100%;padding:13px;border:0;border-radius:13px;background:#007aff;color:#fff;
+    font:600 16px/1 -apple-system,sans-serif
+  }
+  .hint a{color:#007aff;text-decoration:none}
+
+  .leaflet-popup-content-wrapper{
+    border-radius:18px;padding:2px;background:var(--glass);color:var(--ink);
+    -webkit-backdrop-filter:blur(30px) saturate(180%);backdrop-filter:blur(30px) saturate(180%);
+    border:.5px solid var(--edge);box-shadow:var(--shadow)
+  }
+  .leaflet-popup-tip{background:var(--glass)}
+  .leaflet-popup-content{margin:12px 14px;font-size:14.5px;line-height:1.4;letter-spacing:-.1px}
+  .leaflet-popup-content b{display:block;font:600 16px/1.25 -apple-system,sans-serif;letter-spacing:-.3px}
+  .leaflet-popup-content .addr{color:var(--ink-2);font-size:13px}
+  .leaflet-popup-content .verdict{margin-top:6px}
+  .leaflet-popup-content .scope{margin-top:5px;font-size:12px;color:var(--ink-2)}
+  .leaflet-popup-content .go{
+    display:block;margin-top:10px;padding:9px;border-radius:11px;text-align:center;
+    background:#007aff;color:#fff;font-weight:590;text-decoration:none
+  }
+  .leaflet-popup-close-button{display:none}
+  .me{
+    width:18px;height:18px;border-radius:50%;background:#007aff;
+    border:3px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,.15),0 2px 8px rgba(0,122,255,.5)
+  }
+</style>
+
+<div id="map"></div>
+
+<header class="glass">
+  <div class="top"><select class="seg" id="seg"></select><div class="lang" id="lang"></div></div>
+</header>
+
+<button id="locate" class="glass" title="Моё местоположение">◎</button>
+<button id="tips" class="glass">?</button>
+
+<div id="tipsPanel" hidden><div class="tips-card glass">
+  <div class="tips-head"><h2 id="tipsTitle"></h2><button id="tipsClose">✕</button></div>
+  <div class="tips-body" id="tipsBody"></div>
+</div></div>
+
+<div id="gate" hidden><div class="gate-card glass">
+  <h2 id="gateTitle"></h2><p id="gateText"></p><button id="gateOk"></button>
+</div></div>
+
+<section class="sheet glass" id="sheet">
+  <div class="grip-zone" id="grip"><div class="grip"></div></div>
+  <h2><span id="sheetTitle">Ближайшие</span> <small id="sheetSub"></small></h2>
+  <div class="pills" id="pills"></div>
+  <div class="list" id="list"></div>
+</section>
+
+<script src="stations.js"></script>
+<script src="verdict.js"></script>
+<script>
+  const tg = window.Telegram?.WebApp;
+  tg?.ready(); tg?.expand();
+  const dark = tg?.colorScheme === "dark";
+  document.body.classList.toggle("dark", dark);
+
+  const COLOR = { ok: "#34c759", bad: "#ff3b30", warn: "#ff9f0a", none: "#8e8e93" };
+  const CENTER = { "Астана": [51.13, 71.43], "Алматы": [43.24, 76.92] };
+  const CITY = { "Астана": { ru: "Астана", kk: "Астана", en: "Astana" },
+                 "Алматы": { ru: "Алматы", kk: "Алматы", en: "Almaty" } };
+
+  const LABELS = {
+    ru: { ok: "советуют", bad: "жалуются", warn: "спорно", none: "тред молчит" },
+    kk: { ok: "ұсынады", bad: "шағымданады", warn: "даулы", none: "тред үнсіз" },
+    en: { ok: "recommended", bad: "complaints", warn: "mixed", none: "no data" }
+  };
+
+  const I18N = {
+    title:    { ru: "Где заправляться", kk: "Қайда май құю керек", en: "Where to fuel up" },
+    nearby:   { ru: "Ближайшие", kk: "Жақын маңдағы", en: "Nearby" },
+    fromMe:   { ru: "от вашего места", kk: "сіз тұрған жерден", en: "from your location" },
+    fromCity: { ru: "от центра", kk: "орталықтан", en: "from the city centre" },
+    byGis: {
+      ru: "Отзывов о топливе в тредах нет. Зелёный — по 2ГИС: %r из 5 при %v оценках. Но там оценивают сервис и кофе, а не бензин",
+      kk: "Тредтерде отын туралы пікір жоқ. Жасыл түс 2ГИС бойынша: %v бағадан %r. Дегенмен онда бензинді емес, қызмет пен кофені бағалайды",
+      en: "No fuel reviews in the threads. Green comes from 2GIS: %r out of 5 across %v ratings. But those rate the service and the coffee, not the petrol"
+    },
+    aboutSpot: {
+      ru: "↑ отзыв именно об этой АЗС",
+      kk: "↑ дәл осы АЗС туралы пікір",
+      en: "↑ this is about this specific station"
+    },
+    aboutChain: {
+      ru: "↑ отзывы о сети в целом, не об этой колонке",
+      kk: "↑ жалпы желі туралы пікірлер, дәл осы бекет туралы емес",
+      en: "↑ about the chain in general, not this particular site"
+    },
+    quiet: {
+      ru: "По этому городу в Threads пока не пишут — точки показаны по данным 2ГИС, без цвета",
+      kk: "Бұл қала бойынша Threads-те әзірге жазбайды — нүктелер 2ГИС дерегімен, түссіз көрсетілген",
+      en: "Nobody writes about this city on Threads yet — the points come from 2GIS, with no colour"
+    },
+    onGis:    { ru: "в 2ГИС", kk: "2ГИС-те", en: "on 2GIS" },
+    noGis:    { ru: "не сверено с 2ГИС", kk: "2ГИС-пен салыстырылмаған", en: "not verified against 2GIS" },
+    osmCoord: { ru: "координата из OSM", kk: "координатасы OSM-нен", en: "coordinates from OSM" },
+    noMention:{ ru: "в треде не упоминали", kk: "тредте аталмаған", en: "not mentioned in the threads" },
+    route:    { ru: "Маршрут в 2ГИС", kk: "2ГИС-те бағыт", en: "Route in 2GIS" },
+    all:      { ru: "Все", kk: "Барлығы", en: "All" },
+    noGeo:    { ru: "Геолокация недоступна", kk: "Геолокация қолжетімсіз", en: "Geolocation is unavailable" },
+    geoFail:  { ru: "Не удалось определить место. Разреши доступ к геолокации в настройках.",
+                kk: "Орныңызды анықтай алмадым. Параметрлерден геолокацияға рұқсат беріңіз.",
+                en: "Couldn't determine your location. Allow location access in your settings." },
+    official: {
+      ru: `<b>Официально:</b> Минторговли отчиталось 17 сентября. Из 78 проб бензина три не прошли:
+        в Алматы АИ-100 показал октановое число 99 вместо 100 и серы втрое больше нормы, в Кызылординской
+        области под видом АИ-95 продавали 92-й, в Жетысу превышена сера в 92-м. Штраф 843 375 ₸, партии
+        на 5,7 млн ₸ запрещены к продаже. Названия сетей не раскрыли. Обращений к тому дню было уже 53
+        против 12 в августе. Отдельно проверяли присадки Sinoil, QazaqOil и Helios — результат по ним не публиковали.`,
+      kk: `<b>Ресми:</b> Сауда министрлігі 17 қыркүйекте есеп берді. 78 бензин сынамасының үшеуі талапқа
+        сай болмады: Алматыда АИ-100-дің октан саны 100-дің орнына 99, күкірті нормадан үш есе көп;
+        Қызылорда облысында АИ-95 деп 92-ні сатқан; Жетісуда 92-нің күкірті асып кеткен. Айыппұл 843 375 ₸,
+        5,7 млн ₸-лік партияларға тыйым салынды. Желілердің аты жарияланбады. Ол күнге дейін өтініш саны
+        тамыздағы 12-нің орнына 53 болды. Sinoil, QazaqOil және Helios присадкалары бөлек тексерілді —
+        нәтижесі жарияланбады.`,
+      en: `<b>Official:</b> The Ministry of Trade reported on 17 September. Three of 78 petrol samples failed:
+        in Almaty an AI-100 measured 99 octane instead of 100 with three times the sulphur limit; in Kyzylorda
+        region 92-octane fuel was sold as AI-95; in Zhetysu the sulphur limit was exceeded in the 92. A fine of
+        843,375 ₸ was issued and batches worth 5.7m ₸ were barred from sale. No chain names were released.
+        By that date there were 53 complaints, against 12 in August. The additives of Sinoil, QazaqOil and Helios
+        were tested separately, and those results were never published.`
+    },
+    sources: { ru: "Треды-источники", kk: "Дереккөз тредтер", en: "Source threads" },
+    news:    { ru: "Новости", kk: "Жаңалықтар", en: "News" },
+    tipsBtn: { ru: "Советы", kk: "Кеңестер", en: "Tips" },
+    tips: {
+      ru: [
+        ["Как снизить риск",
+         `Жалобы почти все на 95 и 98 — если мотор допускает 92, сейчас он безопаснее.
+          Не выкатывай бак досуха: остаток разбавляет свежее топливо и смягчает удар.
+          Держись двух-трёх проверенных заправок вместо случайных.
+          Не заправляйся сразу после бензовоза — залив поднимает осадок из резервуара.`],
+        ["Если уже залил и машина троит",
+         `Не гоняй и не дави в пол. Долей столько же по октановому числу на другой АЗС — топливо разбавится.
+          Горит Check Engine, машина не заводится или троит дальше — на диагностику, не откладывая:
+          дешевле промыть систему, чем менять форсунки.
+          И не лей в бак ацетон «для октанового числа» — этот совет ходит по тредам, но растворитель
+          разъедает уплотнения и топливный насос. Ремонт выйдет дороже плохого бензина.`],
+        ["Сохрани доказательства",
+         `Чек с АЗС — главное. Без него доказать почти нечего, поэтому не выбрасывай.
+          Сфотографируй колонку и терминал, сними видео, если что-то заметил прямо на месте.
+          Не сливай топливо до экспертизы — проба из бака нужна целой.
+          Возьми заключение СТО с описанием: что нашли в системе и на какую сумму.`],
+        ["Куда жаловаться",
+         `Обращение через egov.kz или единый контакт-центр 1414 — так случай попадёт в официальную статистику.
+          Профильный орган — Комитет технического регулирования и метрологии Минторговли: он и ведёт проверку.
+          Ущерб взыскивается через суд по гражданскому иску, основание — чек плюс заключение СТО.
+          Параллельно напиши в тред: так предупредишь других быстрее любого ведомства.`],
+        ["Почему это важно",
+         `Официальных обращений всего 12, а жалоб в соцсетях в разы больше.
+          Пока случаи не доходят до регулятора, статистика показывает, что проблемы почти нет.`]
+      ],
+      kk: [
+        ["Тәуекелді қалай азайтуға болады",
+         `Шағымның бәрі дерлік 95 пен 98-ге. Қозғалтқышыңыз 92-ні көтерсе, қазір ол қауіпсіздеу.
+          Багты түбіне дейін жүріп бітірмеңіз: қалдық жаңа отынды сұйылтып, соққыны жұмсартады.
+          Кездейсоқ бекеттің орнына екі-үш сенімдісін ұстаныңыз.
+          Бензовоз құйып кеткен соң бірден құймаңыз — құю резервуардағы тұнбаны көтереді.`],
+        ["Құйып қойдым, көлік іркілдейді",
+         `Қатты айдамаңыз. Басқа бекеттен сол октан санын үстеп құйыңыз — отын сұйылады.
+          Check Engine жанса, көлік от алмаса не іркілдей берсе — кідірмей диагностикаға:
+          жүйені жуу форсунка ауыстырудан арзан.
+          Октан санын көтереміз деп бакқа ацетон құймаңыз — тредтерде жүрген кеңес, бірақ еріткіш
+          тығыздағыштар мен отын сорғысын бүлдіреді. Жөндеу нашар бензиннен қымбатқа түседі.`],
+        ["Дәлел жинаңыз",
+         `Бекеттен алған чек — ең бастысы. Онсыз дәлелдеу мүмкін емес, сондықтан тастамаңыз.
+          Бағанды, терминалды суретке түсіріңіз, орнында бірдеңе байқасаңыз — видеоға алыңыз.
+          Сараптамаға дейін отынды төкпеңіз — бактағы сынама бүтін болуы керек.
+          СТО-дан қорытынды алыңыз: жүйеден не тапты және қандай сомаға.`],
+        ["Қайда шағымдану керек",
+         `egov.kz арқылы немесе 1414 бірыңғай байланыс орталығына өтініш — сонда ғана жағдай ресми санаққа кіреді.
+          Бейінді орган — Сауда министрлігінің Техникалық реттеу және метрология комитеті, тексеруді сол жүргізуде.
+          Залал сот арқылы азаматтық талаппен өндіріледі, негізі — чек пен СТО қорытындысы.
+          Қатар тредке де жазыңыз: басқаларды кез келген ведомствадан жылдам ескертесіз.`],
+        ["Бұл неге маңызды",
+         `Ресми өтініш небәрі 12, ал әлеуметтік желідегі шағым әлдеқайда көп.
+          Жағдайлар реттеушіге жетпейінше, статистика мәселе жоқтың қасы екенін көрсете береді.`]
+      ],
+      en: [
+        ["Reducing the risk",
+         `Nearly all complaints concern the 95 and 98 — if your engine takes 92, that is the safer choice right now.
+          Don't run the tank dry: the remaining fuel dilutes the fresh batch and softens the blow.
+          Stick to two or three stations you trust rather than filling up wherever.
+          Avoid filling up right after a tanker delivery — it stirs sediment up from the tank.`],
+        ["If you already filled up and the engine misfires",
+         `Go easy on the throttle. Top up with the same octane at a different station so the fuel gets diluted.
+          If the check engine light is on, the car won't start, or the misfire persists — get it diagnosed now:
+          flushing the system is cheaper than replacing injectors.
+          And don't pour acetone into the tank to “raise the octane” — the tip circulates in the threads,
+          but the solvent eats seals and the fuel pump. That repair costs more than bad petrol ever will.`],
+        ["Keep your evidence",
+         `The receipt is the key document. Without it there is almost nothing to prove, so don't throw it away.
+          Photograph the pump and the terminal, and film anything you notice on the spot.
+          Don't drain the fuel before testing — the sample from the tank must stay intact.
+          Get a written report from the repair shop: what they found and what it cost.`],
+        ["Where to complain",
+         `File through egov.kz or the 1414 hotline — only then does your case enter the official statistics.
+          The responsible body is the Committee for Technical Regulation and Metrology under the Ministry of Trade.
+          Damages are recovered through a civil claim in court, based on the receipt plus the repair shop report.
+          Post in the threads too: you'll warn other drivers faster than any agency can.`],
+        ["Why this matters",
+         `Only 12 formal complaints were filed, while social media holds many times more.
+          As long as cases never reach the regulator, the statistics keep showing there is barely a problem.`]
+      ]
+    },
+    dTitle:  { ru: "Прежде чем начать", kk: "Бастар алдында", en: "Before you start" },
+    dOk:     { ru: "Понятно", kk: "Түсінікті", en: "Got it" },
+    disclaimer: {
+      ru: `Сервис носит справочный характер. Данные — публичные отзывы пользователей Threads и открытые
+        сведения 2ГИС; они не подтверждены лабораторными испытаниями, могут быть неточными или устаревшими.
+        Цвет отражает мнения авторов отзывов, а не утверждение автора карты о качестве топлива.
+        Автор не несёт ответственности за решения, принятые на основании карты, и за любой ущерб.
+        Владельцы АЗС и сетей могут прислать опровержение — оно будет учтено.`,
+      kk: `Сервис анықтамалық сипатта. Дерек көзі — Threads қолданушыларының жария пікірлері мен 2ГИС-тің
+        ашық мәліметтері; олар зертханалық сынақпен расталмаған, дәл емес не ескірген болуы мүмкін.
+        Түс — пікір авторларының көзқарасы, картаны жасаушының отын сапасы туралы тұжырымы емес.
+        Карта негізінде қабылданған шешімдер мен кез келген залал үшін автор жауап бермейді.
+        Бекет пен желі иелері теріске шығару жібере алады — ол ескеріледі.`,
+      en: `This service is informational only. The data comes from public Threads reviews and open 2GIS
+        listings; it is not backed by laboratory testing and may be inaccurate or out of date.
+        The colours reflect the opinions of the people who wrote the reviews, not a claim by the author
+        about fuel quality. The author accepts no liability for decisions made on the basis of this map or
+        for any resulting damage. Station and chain owners may send a rebuttal — it will be taken into account.`
+    },
+    hint: {
+      ru: `Жалуются почти только на <b>95 и 98</b> — на 92 проблем почти нет.
+        Тяжелее всего моторам с прямым впрыском. Цвет — репутация сети, а не конкретной колонки:
+        мнения водителей расходятся, а Павлодарский НПЗ показал пробы по ГОСТ — значит топливо
+        портится уже после отгрузки. Показаны АЗС, сверенные с 2ГИС. Кнопка «± OSM» добавляет точки из OpenStreetMap —
+        их адреса не проверены, часть может быть закрыта или указана неточно.
+        Совет из свежего треда: не выкатывай бак досуха, а если после заправки пошли симптомы —
+        долей столько же по октановому числу на другой АЗС, чтобы разбавить топливо.
+        Данные: Threads 22–28 августа, адреса, рейтинги и отзывы — 2ГИС.`,
+      kk: `Шағым тек <b>95 пен 98-ге</b> түседі — 92-де мәселе жоқтың қасы.
+        Ең қатты зардап шегетіні — тікелей бүрку қозғалтқыштары. Түс дегеніміз нақты бекеттің емес,
+        желінің беделі: жүргізушілердің пікірі әртүрлі, ал Павлодар МӨЗ сынамалары ГОСТ-қа сай шықты —
+        демек отын жөнелтілгеннен кейін бұзылады. 2ГИС-пен салыстырылған бекеттер көрсетілген.
+        «± OSM» батырмасы OpenStreetMap нүктелерін қосады — олардың мекенжайы тексерілмеген,
+        кейбірі жабылған не дұрыс көрсетілмеген болуы мүмкін.
+        Жаңа тредтегі кеңес: багты түбіне дейін жүріп бітірме, ал құйғаннан кейін белгі байқалса —
+        отынды сұйылту үшін басқа бекеттен сол октан санын үстеп құй.
+        Дерек көзі: Threads, 22–28 тамыз; мекенжай, рейтинг пен пікірлер — 2ГИС.`,
+      en: `Complaints are almost entirely about <b>95 and 98</b> — the 92 causes few problems.
+        Direct-injection engines suffer most. The colour is the chain's reputation, not a verdict on one pump:
+        drivers disagree with each other, and the Pavlodar refinery's samples met the state standard — meaning
+        the fuel goes bad after it leaves the plant. Stations shown are cross-checked against 2GIS.
+        The “± OSM” button adds OpenStreetMap points — their addresses are unverified and some may be
+        closed or misplaced. Advice from a fresh thread: don't run the tank dry, and if symptoms appear after filling up,
+        top up with the same octane at another station to dilute the fuel.
+        Sources: Threads, 22–28 August; addresses, ratings and reviews from 2GIS.`
+    }
+  };
+
+  // треды, по которым собраны вердикты
+  const SOURCES = [
+    ["@sds.0708",             "DcdEMpVjebc"],
+    ["@elatkina",             "DcYxoMClwUR"],
+    ["@milod.kharuti",        "DchLqS0CDmQ"],
+    ["@rustamzhanabergenov",  "DcP1OlNiHs0"],
+    ["@nesipbai_nurlan",      "Dca4sQ3jesS"],
+    ["@kazaxzh01",            "DcZO12LACnN"],
+    ["@autopricekz",          "Dckw-qbCpsk"],
+    ["@sailibekov_dauren",    "DcdvBhqgG1T"],
+    ["@temirlaaaan",          "DcaDC8RCFC6"],
+    ["@gerassimovaaaaa",      "DcfvSrtDFcO"],
+    ["@stanislavsky.blog",    "Dcaoo1RAp-S"],
+    ["@saparrov_",            "DcfsUgbiMpF"],
+    ["@ami_blessed",          "DcdooHWDb1h"],
+    ["@nurzhan_makayev",      "DcgUqe4AEu6"],
+    ["@unaspeka",             "DcsDh70DJ5n"],
+    ["Комментарии к карте",   "Dck6hqtDLmt"],
+    ["@gaziz_maratovich",     "Dcisen9DPlG"],
+    ["@diana_zhenissovna",    "Dctu8X-jNNo"],
+    ["@askarbeqov",           "DcyguGAgKE9"]
+  ];
+
+  const NEWS = [
+    ["24.kz",   "https://24.kz/ru/news/social/788387-posle-zhalob-voditelej-v-kazakhstane-proveryayut-benzin-s-17-azs"],
+    ["Курсив",  "https://kz.kursiv.media/2026-08-26/cntr-kazmunajgaz-benzin-s-pavlodarskogo-nhz-sootvetstvuet-trebovaniyam/"],
+    ["Vlast",   "https://vlast.kz/novosti/70636-mintorgovli-proveraet-benzin-na-azs-posle-zalob-kazahstancev-na-ego-kacestvo.html"],
+    ["zakon.kz","https://www.zakon.kz/obshestvo/6529306-kazakhstantsy-massovo-zhaluyutsya-na-kachestvo-benzina--kommentariy-minenergo.html"],
+    ["Итоги проверки", "https://inbusiness.kz/ru/last/mintorgovli-nazvalo-rezultaty-proverok-benzina-na-azs-kazahstana"]
+  ];
+
+  const LANGS = ["ru", "kk", "en"];
+  let lang = localStorage.getItem("lang");
+  if (!LANGS.includes(lang)) lang = LANGS.includes((navigator.language || "").slice(0, 2))
+    ? navigator.language.slice(0, 2) : "ru";
+  const t = k => I18N[k][lang];
+  const LABEL = () => LABELS[lang];
+  const cap = w => w[0].toUpperCase() + w.slice(1);
+
+  // Нет отзывов о топливе — судим по 2ГИС, но только по бесспорным оценкам.
+  const GIS_OK = { r: 4.7, v: 200 };
+
+  const verdict = (name, city, addr, st) => {
+    const spot = SPOT[addr];
+    const hit = spot || (Array.isArray(VERDICT[name]) ? VERDICT[name] : VERDICT[name]?.[city]);
+    if (!hit) {
+      if (st && st.r >= GIS_OK.r && st.v >= GIS_OK.v)
+        return ["ok", t("byGis").replace("%r", st.r).replace("%v", st.v), "gis"];
+      return ["none", null, null];
+    }
+    return [hit[0], hit[1][lang], spot ? "spot" : "chain"];
+  };
+
+  const km = (a, b) => {
+    const R = 6371, r = Math.PI / 180;
+    const dLat = (b[0] - a[0]) * r, dLon = (b[1] - a[1]) * r;
+    const h = Math.sin(dLat / 2) ** 2 +
+              Math.cos(a[0] * r) * Math.cos(b[0] * r) * Math.sin(dLon / 2) ** 2;
+    return 2 * R * Math.asin(Math.sqrt(h));
+  };
+  const fmt = d => d < 1 ? `${Math.round(d * 1000)} м` : `${d.toFixed(d < 10 ? 1 : 0)} км`;
+
+  const map = L.map("map", { zoomControl: false, preferCanvas: true, tap: false });
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19, attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+  }).addTo(map);
+  const layer = L.layerGroup().addTo(map);
+  const markers = new Map();
+  let city = "Астана", me = null, meMarker = null, filter = "all", showOsm = false;
+
+  function popupHtml(s, info, scope) {
+    return `<b>${s.n}</b>` +
+      `<div class="addr">${s.a}${s.r ? ` · ★ ${s.r} ${t("onGis")} (${s.v})` : ` · ${t("osmCoord")}`}</div>` +
+      `<div class="verdict">${info || t("noMention")}</div>` +
+      (scope ? `<div class="scope">${t(scope === "spot" ? "aboutSpot" : "aboutChain")}</div>` : "") +
+      `<a class="go" target="_blank" href="https://2gis.kz/routeSearch/rsType/car/to/${s.lon},${s.lat}">${t("route")}</a>`;
+  }
+
+  function drawMap() {
+    layer.clearLayers(); markers.clear();
+    for (const s of STATIONS.filter(s => s.c === city)) {
+      const [kind, info, scope] = verdict(s.n, city, s.a, s);
+      if (filter !== "all" && kind !== filter) continue;
+      if (s.p === "osm" && !showOsm) continue;
+      const known = kind !== "none";
+      const m = L.circleMarker([s.lat, s.lon], {
+        radius: known ? 8 : 6.5, weight: s.p === "osm" ? 3 : 2,
+        color: s.p === "osm" ? COLOR[kind] : (dark ? "rgba(0,0,0,.55)" : "#fff"),
+        fillColor: s.p === "osm" ? (dark ? "#1c1c1e" : "#fff") : COLOR[kind],
+        fillOpacity: s.p === "osm" ? .9 : (known ? 1 : .85)
+      }).bindPopup(popupHtml(s, info, scope), { offset: [0, -4] }).addTo(layer);
+      markers.set(s, m);
+    }
+  }
+
+  function drawPills(counts) {
+    const items = [["all", t("all"), "var(--ink)"],
+                   ...Object.keys(LABEL()).map(k => [k, cap(LABEL()[k]), COLOR[k]])];
+    document.getElementById("pills").innerHTML = items.map(([k, text, color]) => {
+      const n = k === "all" ? Object.values(counts).reduce((a, b) => a + b, 0) : (counts[k] || 0);
+      const on = filter === k;
+      return `<button class="pill ${on ? "on" : ""}" data-k="${k}" ${n ? "" : "disabled"}
+        style="${on ? `background:${k === "all" ? "#007aff" : color}` : ""}">
+        ${k === "all" ? "" : `<i style="background:${color}"></i>`}${text} <em>${n}</em></button>`;
+    }).join("");
+    const hidden = STATIONS.filter(s => s.c === city && s.p === "osm").length;
+    if (hidden) document.getElementById("pills").insertAdjacentHTML("beforeend",
+      `<button class="pill ${showOsm ? "on" : ""}" data-osm="1"
+        style="${showOsm ? "background:#8e8e93" : ""}">±&nbsp;OSM <em>${hidden}</em></button>`);
+
+    document.querySelectorAll(".pill").forEach(b => b.onclick = () => {
+      if (b.dataset.osm) showOsm = !showOsm;
+      else filter = filter === b.dataset.k ? "all" : b.dataset.k;  // повторный тап снимает фильтр
+      drawMap(); drawList();
+    });
+  }
+
+  function drawList() {
+    const from = me || CENTER[city];
+    const all = STATIONS
+      .filter(s => s.c === city && (showOsm || s.p !== "osm"))
+      .map(s => ({ s, d: km(from, [s.lat, s.lon]), v: verdict(s.n, city, s.a, s) }))
+      .sort((a, b) => a.d - b.d);
+
+    const counts = {};
+    for (const r of all) counts[r.v[0]] = (counts[r.v[0]] || 0) + 1;
+    drawPills(counts);
+
+    const rows = all.filter(r => filter === "all" || r.v[0] === filter).slice(0, 40);
+
+    document.getElementById("sheetTitle").textContent =
+      filter === "all" ? t("nearby") : `${t("nearby")} · ${LABEL()[filter]}`;
+    const quiet = all.every(r => r.v[0] === "none");
+    document.getElementById("sheetSub").textContent = quiet ? t("quiet")
+      : me ? t("fromMe") : `${t("fromCity")} · ${CITY[city][lang]}`;
+    document.getElementById("list").innerHTML = rows.map(({ s, d, v }, i) => `
+      <button class="row" data-i="${i}">
+        <i class="dot" style="background:${COLOR[v[0]]}"></i>
+        <span class="txt">
+          <b>${s.n}</b>
+          <span>${LABEL()[v[0]]}${s.r ? ` · ★ ${s.r}` : ` · ${t("noGis")}`} · ${s.a}</span>
+        </span>
+        <i class="km">${fmt(d)}</i>
+      </button>`).join("") + `<p class="hint">${t("hint")}</p>` + `<p class="hint">${t("official")}</p>` + `
+      <p class="hint src"><b>${t("sources")}:</b> ` + SOURCES.map(([who, id]) =>
+        `<a target="_blank" href="https://www.threads.com/${who}/post/${id}">${who}</a>`).join(" · ") + `</p>` + `<p class="hint dis">${t("disclaimer")}</p>` + `
+      <p class="hint src"><b>${t("news")}:</b> ` + NEWS.map(([who, url]) =>
+        `<a target="_blank" href="${url}">${who}</a>`).join(" · ") + `</p>`;
+
+    document.querySelectorAll(".row").forEach(el => el.onclick = () => {
+      if (moved) return;
+      const { s } = rows[+el.dataset.i];
+      setOpen(false);
+      map.setView([s.lat, s.lon], 16, { animate: true });
+      markers.get(s)?.openPopup();
+    });
+  }
+
+  function render(recenter = true, keepFilter = false) {
+    if (!keepFilter) filter = "all";
+    document.documentElement.lang = lang;
+    document.getElementById("lang").innerHTML = LANGS.map(l =>
+      `<button class="${l === lang ? "on" : ""}" data-lang="${l}">${l}</button>`).join("");
+    document.querySelectorAll("#lang button").forEach(b =>
+      b.onclick = () => { lang = b.dataset.lang; localStorage.setItem("lang", lang); render(false, true); });
+    const seg = document.getElementById("seg");
+    seg.innerHTML = Object.keys(CENTER).map(c =>
+      `<option value="${c}" ${c === city ? "selected" : ""}>${CITY[c][lang]}</option>`).join("");
+    seg.onchange = () => { city = seg.value; render(); };
+    map.invalidateSize();
+    if (recenter) map.setView(me && nearCity(me) === city ? me : CENTER[city], me ? 14 : 12);
+    drawMap(); drawList();
+  }
+
+  const nearCity = pt =>
+    Object.entries(CENTER).sort((a, b) => km(pt, a[1]) - km(pt, b[1]))[0][0];
+
+  const sheet = document.getElementById("sheet");
+  const list = document.getElementById("list");
+  const syncLocate = () => ["locate", "tips"].forEach(id =>
+    document.getElementById(id).classList.toggle("hide", open_));
+  let open_ = false, travel = 0;
+
+  const setOpen = v => {
+    open_ = v;
+    sheet.style.transform = "";
+    sheet.classList.toggle("open", v);
+    syncLocate();
+  };
+
+  let start = null, moved = false, active = false;
+  sheet.addEventListener("pointerdown", e => {
+    if (e.target.closest("a,.pill,select")) return;
+    travel = sheet.getBoundingClientRect().height -
+             parseFloat(getComputedStyle(sheet).getPropertyValue("--sheet-peek"));
+    start = { y: e.clientY, t: e.timeStamp, top: list.scrollTop, inList: list.contains(e.target) };
+    moved = active = false;
+  });
+
+  sheet.addEventListener("pointermove", e => {
+    if (!start) return;
+    const dy = e.clientY - start.y;
+    if (!active) {
+      if (Math.abs(dy) < 6) return;
+      // список сам скроллится: тянем шторку только вниз и только с верха списка
+      if (start.inList && open_ && (dy < 0 || start.top > 0)) return (start = null);
+      active = true; moved = true;
+      sheet.classList.add("drag");
+      sheet.setPointerCapture(e.pointerId);
+    }
+    const y = Math.min(travel, Math.max(0, (open_ ? 0 : travel) + dy));
+    sheet.style.transform = `translate3d(0,${y}px,0)`;
+  });
+
+  const end = e => {
+    if (!start) return;
+    const dy = e.clientY - start.y, v = dy / Math.max(1, e.timeStamp - start.t);
+    sheet.classList.remove("drag");
+    if (!moved) setOpen(!open_);                     // просто тап
+    else if (Math.abs(v) > .5) setOpen(v < 0);       // рывок решает за расстояние
+    else setOpen(((open_ ? 0 : travel) + dy) < travel / 2);
+    start = null;
+  };
+  sheet.addEventListener("pointerup", end);
+  sheet.addEventListener("pointercancel", () => { sheet.classList.remove("drag"); setOpen(open_); start = null; });
+
+  const locate = document.getElementById("locate");
+  locate.onclick = () => {
+    if (!navigator.geolocation) return alert(t("noGeo"));
+    locate.classList.add("busy");
+    navigator.geolocation.getCurrentPosition(p => {
+      locate.classList.remove("busy");
+      me = [p.coords.latitude, p.coords.longitude];
+      const near = nearCity(me);
+      if (km(me, CENTER[near]) < 60) city = near;      // далеко от обоих — город не меняем
+      meMarker?.remove();
+      meMarker = L.marker(me, { icon: L.divIcon({ className: "", html: '<div class="me"></div>',
+                                                  iconSize: [18, 18] }) }).addTo(map);
+      render();
+      setOpen(true);
+    }, () => {
+      locate.classList.remove("busy");
+      alert(t("geoFail"));
+    }, { enableHighAccuracy: true, timeout: 10000 });
+  };
+
+  const panel = document.getElementById("tipsPanel");
+  const drawTips = () => {
+    document.getElementById("tipsTitle").textContent = t("tipsBtn");
+    document.getElementById("tipsBody").innerHTML = t("tips")
+      .map(([h, body]) => `<section><h3>${h}</h3><p>${body}</p></section>`).join("");
+  };
+  document.getElementById("tips").onclick = () => { drawTips(); panel.hidden = false; };
+  document.getElementById("tipsClose").onclick = () => { panel.hidden = true; };
+  panel.onclick = e => { if (e.target === panel) panel.hidden = true; };
+
+  const gate = document.getElementById("gate");
+  if (!localStorage.getItem("agreed")) {
+    document.getElementById("gateTitle").textContent = t("dTitle");
+    document.getElementById("gateText").innerHTML = t("disclaimer");
+    document.getElementById("gateOk").textContent = t("dOk");
+    gate.hidden = false;
+    document.getElementById("gateOk").onclick = () => {
+      localStorage.setItem("agreed", "1");
+      gate.hidden = true;
+    };
+  }
+
+  render();
+  addEventListener("resize", () => map.invalidateSize());
+  if ("serviceWorker" in navigator) addEventListener("load", async () => {
+    let reloading = false;
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      if (!reloading) { reloading = true; location.reload(); }   // приехала новая версия
+    });
+    const reg = await navigator.serviceWorker.register("sw.js").catch(() => null);
+    reg?.update();
+  });
+</script>
+
+<script type="module" src="https://static.cloudflareinsights.com/beacon.min.js"
+        data-cf-beacon='{"token": "5b30b39ad25d49e0a1dac05dba5dc9c3"}'></script>
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-5B4ZW2QSZL"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+  gtag('config', 'G-5B4ZW2QSZL');
+</script>
