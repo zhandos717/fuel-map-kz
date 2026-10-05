@@ -250,6 +250,7 @@
     nearby:   { ru: "Ближайшие", kk: "Жақын маңдағы", en: "Nearby" },
     fromMe:   { ru: "от вашего места", kk: "сіз тұрған жерден", en: "from your location" },
     fromCity: { ru: "от центра", kk: "орталықтан", en: "from the city centre" },
+    updated: { ru: "отзывы на", kk: "пікірлер:", en: "reviews as of" },
     byGis: {
       ru: "Отзывов о топливе в тредах нет. Зелёный — по 2ГИС: %r из 5 при %v оценках. Но там оценивают сервис и кофе, а не бензин",
       kk: "Тредтерде отын туралы пікір жоқ. Жасыл түс 2ГИС бойынша: %v бағадан %r. Дегенмен онда бензинді емес, қызмет пен кофені бағалайды",
@@ -563,8 +564,9 @@
     document.getElementById("sheetTitle").textContent =
       filter === "all" ? t("nearby") : `${t("nearby")} · ${LABEL()[filter]}`;
     const quiet = all.every(r => r.v[0] === "none");
-    document.getElementById("sheetSub").textContent = quiet ? t("quiet")
-      : me ? t("fromMe") : `${t("fromCity")} · ${CITY[city][lang]}`;
+    const asOf = window.UPDATED ? fmtDay(window.UPDATED) : "";
+    document.getElementById("sheetSub").textContent = (quiet ? t("quiet")
+      : me ? t("fromMe") : `${t("fromCity")} · ${CITY[city][lang]}`) + (asOf ? ` · ${t("updated")} ${asOf}` : "");
     document.getElementById("list").innerHTML = rows.map(({ s, d, v }, i) => `
       <button class="row" data-i="${i}">
         <i class="dot" style="background:${COLOR[v[0]]}"></i>
@@ -588,6 +590,13 @@
     });
   }
 
+  // Свои названия месяцев: казахская локаль в браузерах отдаёт «M10» вместо «қазан».
+  const MONTHS = {
+    ru: ["января","февраля","марта","апреля","мая","июня","июля","августа","сентября","октября","ноября","декабря"],
+    kk: ["қаңтар","ақпан","наурыз","сәуір","мамыр","маусым","шілде","тамыз","қыркүйек","қазан","қараша","желтоқсан"],
+    en: ["January","February","March","April","May","June","July","August","September","October","November","December"]
+  };
+  const fmtDay = iso => { const [, m, d] = iso.split("-").map(Number); return `${d} ${MONTHS[lang][m - 1]}`; };
   function render(recenter = true, keepFilter = false) {
     if (!keepFilter) filter = "all";
     document.documentElement.lang = lang;
